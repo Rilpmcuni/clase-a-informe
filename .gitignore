@@ -1,0 +1,12 @@
+# Entorno y cachés
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Secretos — NUNCA subir la API key
+.env
+
+# Salidas de análisis (videos procesados)
+*_analisis/
+salida*/
