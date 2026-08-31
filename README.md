@@ -102,8 +102,8 @@ Notas de diseño:
 
 ## Modelos (configurables en `.env`)
 
-- `MODELO_VISION`: `glm-4.6v` (default) o `glm-4.5v`
-- `MODELO_TEXTO`: `glm-5.3` (default), `glm-4.6` o `glm-5.3-flash` (más barato)
+`glm-5.3-flash` tiene visión y rendimiento sobrado: **un solo modelo para todo** (configuración por defecto del repo).
+Alternativas: `MODELO_VISION` → `glm-4.6v`, `glm-4.5v` · `MODELO_TEXTO` → `glm-5.3`, `glm-4.6`
 
 ## Stack (todo open source)
 

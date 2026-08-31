@@ -10,3 +10,5 @@ __pycache__/
 # Salidas de análisis (videos procesados)
 *_analisis/
 salida*/
+# Videos de clases (no van al git)
+videos/
