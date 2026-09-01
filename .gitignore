@@ -1,14 +1,14 @@
+# Datos locales del app (videos, análisis, config, memoria)
+.data/
+
 # Entorno y cachés
 .venv/
+web/node_modules/
+web/.next/
+web/.env*
 __pycache__/
 *.pyc
 .DS_Store
 
-# Secretos — NUNCA subir la API key
+# Secretos
 .env
-
-# Salidas de análisis (videos procesados)
-*_analisis/
-salida*/
-# Videos de clases (no van al git)
-videos/

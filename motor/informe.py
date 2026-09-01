@@ -91,7 +91,7 @@ def _llamar_json(cliente, prompt: str) -> dict:
 
 
 def generar_informe(cfg, transcripcion: list[dict], frames_unicos: list[dict],
-                    descripciones: list[dict]) -> Path:
+                    descripciones: list[dict], progreso=None) -> Path:
     from .vision import ClienteIA
 
     cliente = ClienteIA(cfg)
@@ -104,6 +104,9 @@ def generar_informe(cfg, transcripcion: list[dict], frames_unicos: list[dict],
     partes = []
     for i, frag in enumerate(fragmentos, 1):
         loguear(f"resumiendo fragmento {i}/{len(fragmentos)}…")
+        if progreso:
+            progreso("informe", "progreso", round(i / (len(fragmentos) + 1) * 80, 1),
+                     f"fragmento {i}/{len(fragmentos)}")
         try:
             parcial = _llamar_json(cliente, PROMPT_PARCIAL.replace("{contenido}", frag))
         except Exception as e:
@@ -115,6 +118,8 @@ def generar_informe(cfg, transcripcion: list[dict], frames_unicos: list[dict],
     guardar_json(cfg.salida / "partes.json", partes)
 
     loguear("generando informe final consolidado…")
+    if progreso:
+        progreso("informe", "progreso", 85.0, "consolidando informe final")
     try:
         final = _llamar_json(cliente, PROMPT_FINAL.replace(
             "{partes}", "\n\n".join(str(p) for p in partes)))

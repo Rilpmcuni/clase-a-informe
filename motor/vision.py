@@ -69,11 +69,15 @@ class ClienteIA:
 
 
 def describir_frames(frames: list[dict], carpeta: Path, cliente: ClienteIA,
-                     paralelo: int) -> list[dict]:
+                     paralelo: int, progreso=None) -> list[dict]:
     rutas = [carpeta / f["archivo"] for f in frames if (carpeta / f["archivo"]).exists()]
     resultados = []
+    total = len(rutas)
     with ThreadPoolExecutor(max_workers=max(1, paralelo)) as pool:
         for i, desc in enumerate(pool.map(cliente.describir_frame, rutas), 1):
             resultados.append(desc)
-            loguear(f"[{i}/{len(rutas)}] {desc.get('titulo', '')[:70]}")
+            loguear(f"[{i}/{total}] {desc.get('titulo', '')[:70]}")
+            if progreso:
+                progreso("vision", "progreso", round(i / total * 100, 1),
+                         f"{i}/{total}: {desc.get('titulo', '')[:50]}")
     return resultados

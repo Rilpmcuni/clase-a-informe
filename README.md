@@ -1,68 +1,70 @@
 # clase-a-informe
 
-Convierte un **video de clase grabado** (por ejemplo con ShareX) en un **informe de
-estudio completo**, combinando lo que se **dice** y lo que se **muestra**:
+Convierte un **video de clase grabado** (por ejemplo con ShareX u OBS) en **material de
+estudio completo**, combinando lo que se **dice** y lo que se **muestra** — con una
+interfaz web para seguir todo el proceso y estudiar la clase.
 
 - 🎙️ **Transcripción de la voz** con marcas de tiempo — local y gratis (faster-whisper)
-- 🖼️ **Detección automática de diapositivas** — solo se extrae un frame por cada
-  cambio real de contenido (PySceneDetect + hash perceptual con firma de color)
-- 👁️ **Lectura de diapositivas y pizarra** con un modelo de visión (GLM-4.6V vía z.ai)
-- 📄 **Informe de estudio final** generado con IA: temario, resúmenes por tema,
-  conceptos clave, preguntas y respuestas, datos curiosos, posibles preguntas de
-  examen, glosario y flashcards para Anki
+- 🖼️ **Detección automática de diapositivas** — solo un frame por cada cambio real de
+  contenido (PySceneDetect + hash perceptual con firma de color)
+- 👁️ **Lectura de diapositivas y pizarra** con visión IA (glm-5.3-flash vía z.ai)
+- 📄 **Informe de estudio**: temario, resúmenes por tema, conceptos clave, Q&A,
+  datos curiosos, posibles preguntas de examen, glosario y flashcards para Anki
+- 🖥️ **Interfaz web**: sube el video arrastrándolo, mira cada paso del análisis en vivo,
+  estudia con video + subtítulos + transcripción sincronizada (clic en un minuto o un
+  tema y el video salta ahí), chatea con un tutor IA que vio toda la clase y descarga
+  el informe en PDF con diseño editorial
 
 100% local salvo las llamadas de visión y redacción (tu API key de z.ai).
 
-## Instalación
+## Inicio rápido
 
-Requisitos: **Python 3.10–3.12**, **ffmpeg** en el PATH, y una API key de [z.ai](https://z.ai/model-api).
+**macOS:** doble clic en `iniciar.command` (la primera vez: clic derecho → Abrir).
+**Windows:** doble clic en `iniciar.bat`.
 
-```bash
-# macOS
-python3.12 -m venv .venv
-source .venv/bin/activate
+El lanzador instala solo lo que falte (Node.js, Python 3.12, FFmpeg, Homebrew/winget),
+prepara dependencias, compila la interfaz, arranca todo y abre
+[http://localhost:4310](http://localhost:4310). **Cierra la ventana y se apaga todo.**
 
-# Windows (PowerShell)
-py -3.12 -m venv .venv
-.venv\Scripts\Activate.ps1
+Primera vez dentro de la app: entra a **Ajustes** y pega tu API key de z.ai
+(vive en `.data/config.json`, que nunca se sube a git).
 
-pip install -r requirements.txt
-```
+> ¿Usas una key del **GLM Coding Plan**? El endpoint correcto es
+> `https://api.z.ai/api/coding/paas/v4` (ya viene por defecto). Una key de la API por
+> consumo usa `https://api.z.ai/api/paas/v4`.
 
-```bash
-cp .env.example .env   # y pega tu ZAI_API_KEY dentro
-```
-
-> En Windows, si no tienes ffmpeg: `winget install ffmpeg`
-
-## Uso
+### Instalación manual (si prefieres)
 
 ```bash
-python analiza.py MI_CLASE.mp4
+python3.12 -m venv .venv                     # Windows: py -3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt    # Windows: .venv\Scripts\pip ...
+cd web && npm install && npm run build && npm run start
 ```
 
-Eso genera la carpeta `MI_CLASE_analisis/` con:
+## La app
 
-| Archivo | Contenido |
+| Vista | Qué hace |
 |---|---|
-| `informe.md` | **El informe de estudio** (temario, resúmenes, Q&A, examen, glosario) |
-| `flashcards_anki.tsv` | Flashcards listas para importar en Anki (Archivo → Importar) |
-| `transcripcion.md` | Transcripción completa con minutos |
-| `frames/` | Diapositivas únicas detectadas (`duplicados/` las descartadas) |
-| `transcripcion.json`, `frames_unicos.json`, `descripciones.json`, `partes.json`, `informe.json` | Estados intermedios (reanudable: si se corta, re-correr continúa donde iba) |
+| **Clases** (dashboard) | Tus clases analizadas + zona de arrastre para subir un video nuevo |
+| **Procesando** | Las 4 fases del motor en vivo (voz → escenas → visión → informe) con progreso y registro |
+| **Clase** | Video con subtítulos, transcripción sincronizada (clic = saltar, selecciona texto = pregúntale a la IA), galería de diapositivas, informe completo y **chat** con adjuntos (fotograma capturado o fragmento seleccionado) |
+| **Ajustes** | API key, endpoint, modelos, umbral de escenas, whisper, paralelismo — con botón "probar conexión" |
+| **Memoria** | Notas que la app aprende automáticamente de tus clases; el chat las lee |
 
-### Opciones útiles
+**PDF**: botón «Descargar informe PDF» en la vista de clase — se genera al vuelo con
+Puppeteer (A4 vectorial, portada, figuras con su texto visible, glosario).
+
+## Uso por consola (opcional)
 
 ```bash
-python analiza.py clase.mp4 --sin-ia              # modo offline: solo transcripción + frames
-python analiza.py clase.mp4 --whisper-modelo medium   # mejor precisión de voz (más lento)
-python analiza.py clase.mp4 --umbral 20           # detecta cambios de diapositiva más sutiles
-python analiza.py clase.mp4 --muestreo-seg 120    # frames cada 2 min (clases de mucha pizarra)
-python analiza.py clase.mp4 --rehacer             # reprocesar desde cero
-python analiza.py clase.mp4 -o SALIDA             # carpeta de salida personalizada
+python analiza.py MI_CLASE.mp4          # genera .data/analisis/MI_CLASE/
+python analiza.py clase.mp4 --sin-ia    # offline: solo transcripción + frames
+python analiza.py clase.mp4 --umbral 20 --whisper-modelo medium --rehacer
+python analiza.py --help                # todas las opciones
 ```
 
-Ver todas: `python analiza.py --help`
+Todo queda en `.data/` (gitignored): `videos/`, `analisis/<id>/`, `jobs/`,
+`memoria/MEMORIA.md`, `config.json`. Borrar la carpeta del proyecto desinstala todo.
 
 ## Cómo funciona
 
@@ -71,39 +73,36 @@ video.mp4
    ├─► audio ──► faster-whisper ──► transcripción con timestamps
    └─► video ──► PySceneDetect (umbral de contenido) ──► frame por cambio real
                     └─► hash perceptual + firma de color ──► diapositivas únicas
-                    └─► rachas de escenas cortas ──► marcadas "video proyectado" (se ignoran)
+                    └─► rachas de escenas cortas ──► "video proyectado" (se descarta)
    ▼
-cada diapositiva única ──► GLM-4.6V (visión) ──► texto visible, bullets, fórmulas
+cada diapositiva única ──► glm-5.3-flash (visión) ──► texto visible, bullets, fórmulas
    ▼
-cronología (voz + visual) ──► fragmentos ──► GLM-5.3 resume cada uno (map-reduce)
+cronología (voz + visual) ──► fragmentos ──► glm-5.3-flash resume (map-reduce)
    ▼
-informe.md + flashcards_anki.tsv
+informe.json/md + flashcards_anki.tsv + informe.pdf
 ```
 
 Notas de diseño:
 
-- **Solo se paga visión por diapositivas únicas**: una clase de 40 slides = ~40 llamadas,
-  no 40 × cada cuánto se apareció. Los fotogramas de videos proyectados se descartan.
+- **Solo se paga visión por diapositivas únicas**: 40 slides = ~40 llamadas, no 40 ×
+  cada vez que apareció. Los fotogramas de videos proyectados se descartan.
 - **El Markdown lo arma Python, no el LLM**: el modelo devuelve JSON estructurado y el
-  programa incrusta las imágenes donde corresponde (con reintento y fallback si el JSON viene roto).
+  programa incrusta las imágenes donde corresponde (con reintento y fallback).
 - **Reanudable**: cada etapa guarda su JSON; si algo falla a mitad de una clase larga,
-  se vuelve a correr y continúa donde estaba.
+  volver a analizar continúa donde estaba (el botón «Reanalizar» sí rehace la IA).
+- **Interfaz = Next.js que orquesta**: la web lanza el motor Python como subproceso y
+  lee su progreso línea a línea (eventos JSON); el estado sobrevive recargas.
 
 ## Ajustes finos
 
 | Problema | Solución |
 |---|---|
-| Se escapa algún cambio de diapositiva | `--umbral 20` (o menor; default 27) |
-| Detecta "cambios" que no son (animaciones) | `--umbral 32` |
-| Transcripción con errores de nombres técnicos | `--whisper-modelo medium` o `large-v3` |
-| Clase dictada en otro idioma | `--idioma en` (o `auto`) |
-| Clase de mucha pizarra, pocos cambios | `--muestreo-seg 120` |
-| La API limita velocidad (429) | `--paralelo 1` |
-
-## Modelos (configurables en `.env`)
-
-`glm-5.3-flash` tiene visión y rendimiento sobrado: **un solo modelo para todo** (configuración por defecto del repo).
-Alternativas: `MODELO_VISION` → `glm-4.6v`, `glm-4.5v` · `MODELO_TEXTO` → `glm-5.3`, `glm-4.6`
+| Se escapa algún cambio de diapositiva | Umbral 20 en Ajustes (default 27) |
+| Detecta "cambios" que no son (animaciones) | Umbral 32 |
+| Transcripción con errores de nombres técnicos | whisper `medium` o `large-v3` |
+| Clase dictada en otro idioma | idioma `en` |
+| Clase de mucha pizarra, pocos cambios | Muestreo 120 s |
+| La API limita velocidad (429) | Paralelismo 1 |
 
 ## Stack (todo open source)
 
@@ -111,4 +110,6 @@ Alternativas: `MODELO_VISION` → `glm-4.6v`, `glm-4.5v` · `MODELO_TEXTO` → `
 [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) ·
 [imagehash](https://github.com/JohannesBuchner/imagehash) ·
 [Pillow](https://github.com/python-pillow/Pillow) ·
-[ffmpeg](https://ffmpeg.org) · API [z.ai](https://z.ai/model-api) (GLM)
+[ffmpeg](https://ffmpeg.org) ·
+[Next.js](https://nextjs.org) + [shadcn/ui](https://ui.shadcn.com) +
+[AI SDK](https://sdk.vercel.ai) + [Puppeteer](https://pptr.dev) · API [z.ai](https://z.ai) (GLM)
