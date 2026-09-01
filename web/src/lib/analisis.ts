@@ -56,6 +56,7 @@ export function listar(): ResumenAnalisis[] {
     const informe = leerJson<Informe>(path.join(carpeta, "informe.json"));
     const transcripcion = leerJson<Segmento[]>(path.join(carpeta, "transcripcion.json"));
     const frames = leerJson<FrameUnico[]>(path.join(carpeta, "frames_unicos.json"));
+    const descripciones = leerJson<DescripcionFrame[]>(path.join(carpeta, "descripciones.json"));
     const job = obtenerJob(id);
     const estado: ResumenAnalisis["estado"] = job
       ? job.estado === "listo"
@@ -66,6 +67,12 @@ export function listar(): ResumenAnalisis[] {
       : informe
         ? "listo"
         : "incompleto";
+    // carátula: primera diapositiva de relevancia alta; si no hay, el primer frame
+    const relevPor = new Map((descripciones ?? []).map((d) => [d.archivo, d.relevancia]));
+    const framePortada =
+      frames?.find((f) => relevPor.get(f.archivo) === "alta")?.archivo ??
+      frames?.[0]?.archivo ??
+      null;
     salida.push({
       id,
       titulo: informe?.titulo ?? meta?.video ?? id,
@@ -77,6 +84,7 @@ export function listar(): ResumenAnalisis[] {
       tieneInforme: Boolean(informe),
       tienePdf: fs.existsSync(path.join(carpeta, "informe.pdf")),
       estado,
+      portada: framePortada,
     });
   }
   return salida.sort((a, b) => b.creado.localeCompare(a.creado));

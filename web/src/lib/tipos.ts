@@ -72,4 +72,6 @@ export interface ResumenAnalisis {
   tieneInforme: boolean;
   tienePdf: boolean;
   estado: "corriendo" | "listo" | "incompleto" | "error";
+  /** archivo de frame elegido como carátula de la tarjeta (null si aún no hay) */
+  portada?: string | null;
 }
