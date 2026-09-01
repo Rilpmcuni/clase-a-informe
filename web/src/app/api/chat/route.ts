@@ -2,6 +2,7 @@ import { convertToModelMessages, streamText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { cargarConfig } from "@/lib/config";
 import { contextoParaChat, existeAnalisis } from "@/lib/analisis";
+import { contextoChatsAnteriores } from "@/lib/chats";
 import { leerMemoria } from "@/lib/memoria";
 import { validarId } from "@/lib/raiz";
 
@@ -12,7 +13,7 @@ export const maxDuration = 300;
 
 export async function POST(req: Request) {
   const cuerpo = (await req.json().catch(() => null)) as
-    | { messages?: unknown[]; idClase?: string }
+    | { messages?: unknown[]; idClase?: string; chatId?: string }
     | null;
   if (!cuerpo?.messages) {
     return new Response("faltan messages", { status: 400 });
@@ -23,9 +24,16 @@ export async function POST(req: Request) {
   }
 
   let contexto = "";
+  let chatsPrevios = "";
   if (cuerpo.idClase && validarId(cuerpo.idClase) && existeAnalisis(cuerpo.idClase)) {
     contexto = "\n\nContexto de la clase actual (generado por el análisis):\n" +
       contextoParaChat(cuerpo.idClase);
+    const extracto = contextoChatsAnteriores(cuerpo.idClase, cuerpo.chatId);
+    if (extracto) {
+      chatsPrevios =
+        "\n\nConversaciones anteriores del estudiante en esta clase (para continuidad; " +
+        "puedes referirte a lo que ya se habló):\n" + extracto;
+    }
   }
   const memoria = leerMemoria();
   const memoriaRecortada = memoria.length > 4000 ? memoria.slice(0, 4000) + "…" : memoria;
@@ -40,6 +48,7 @@ export async function POST(req: Request) {
     const resultado = streamText({
       model: proveedor.chatModel(cfg.modeloTexto),
       system: SISTEMA_BASE + (contexto || "\n(No hay clase cargada: chat general)") +
+        chatsPrevios +
         "\n\nMemoria acumulada del estudiante (tus notas automáticas y lo que ha decidido recordar):\n" +
         memoriaRecortada,
       messages: await convertToModelMessages(cuerpo.messages as never),

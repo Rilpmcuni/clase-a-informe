@@ -85,6 +85,8 @@ export function listar(): ResumenAnalisis[] {
       tienePdf: fs.existsSync(path.join(carpeta, "informe.pdf")),
       estado,
       portada: framePortada,
+      materia: informe?.materia ?? null,
+      profesor: informe?.profesor ?? null,
     });
   }
   return salida.sort((a, b) => b.creado.localeCompare(a.creado));

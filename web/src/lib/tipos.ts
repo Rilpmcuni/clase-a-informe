@@ -47,6 +47,8 @@ export interface TemaInforme {
 
 export interface Informe {
   titulo: string;
+  materia?: string | null;
+  profesor?: string | null;
   resumen_ejecutivo: string;
   temas: TemaInforme[];
   examen?: PreguntaRespuesta[];
@@ -74,4 +76,7 @@ export interface ResumenAnalisis {
   estado: "corriendo" | "listo" | "incompleto" | "error";
   /** archivo de frame elegido como carátula de la tarjeta (null si aún no hay) */
   portada?: string | null;
+  /** clasificación de la clase hecha por la IA */
+  materia?: string | null;
+  profesor?: string | null;
 }

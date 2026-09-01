@@ -28,6 +28,8 @@ PROMPT_FINAL = """Eres un profesor experto. Con las partes parciales de una clas
 Fusiona los temas que se repitan, elimina duplicados y mantén el orden cronológico.
 Responde EXCLUSIVAMENTE con un objeto JSON válido, sin texto adicional:
 {"titulo": "título de la clase",
+ "materia": "asignatura a la que pertenece la clase (ej: Matemática, Historia, Economía, Biología). null si no se puede deducir",
+ "profesor": "nombre del profesor o docente si se menciona. null si no se menciona",
  "resumen_ejecutivo": "5-10 frases con la esencia de toda la clase",
  "temas": [{"tema": "", "duracion": "ej: 00:05-00:20", "resumen": "",
             "conceptos": [{"termino": "", "definicion": ""}],

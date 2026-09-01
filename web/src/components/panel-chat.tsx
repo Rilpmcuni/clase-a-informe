@@ -1,16 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import type { UIMessage } from "ai";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Camera, Loader2, Send, Square, TriangleAlert, User } from "lucide-react";
+import {
+  Bot,
+  Camera,
+  ChevronDown,
+  History,
+  Loader2,
+  MessageSquarePlus,
+  Send,
+  Square,
+  Trash2,
+  TriangleAlert,
+  User,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useAdjuntosChat } from "@/lib/store";
-import { mmss } from "@/lib/tiempo";
+import { fechaLegible, mmss } from "@/lib/tiempo";
 import { cn } from "@/lib/utils";
 
 // Estilos de markdown para las respuestas del asistente (GFM: tablas, listas, código…)
@@ -58,22 +78,150 @@ function TextoSimple({ texto }: { texto: string }) {
   );
 }
 
+interface MetaChat {
+  id: string;
+  titulo: string;
+  creado: string;
+  actualizado: string;
+  nMensajes: number;
+}
+
+/** Panel completo: gestiona el historial y delega la conversación activa. */
 export function PanelChat({ idClase }: { idClase: string }) {
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [iniciales, setIniciales] = useState<UIMessage[] | null>(null);
+  const [lista, setLista] = useState<MetaChat[]>([]);
+
+  const refrescarLista = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/chats/${idClase}`);
+      const j = await r.json();
+      setLista(j.chats ?? []);
+    } catch {
+      // sin historial disponible: seguir igual
+    }
+  }, [idClase]);
+
+  const abrir = useCallback(
+    async (cid: string) => {
+      let mensajes: UIMessage[] = [];
+      try {
+        const r = await fetch(`/api/chats/${idClase}/${cid}`);
+        if (r.ok) {
+          const j = await r.json();
+          mensajes = j.chat?.messages ?? [];
+        }
+      } catch {
+        // conversación ilegible: abrir vacía
+      }
+      setIniciales(mensajes);
+      setChatId(cid);
+    },
+    [idClase],
+  );
+
+  const nueva = useCallback(() => {
+    setIniciales([]);
+    setChatId(crypto.randomUUID());
+  }, []);
+
+  // al montar: recuperar la última conversación o empezar una nueva
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/chats/${idClase}`);
+        const j = await r.json();
+        const chats: MetaChat[] = j.chats ?? [];
+        if (!vivo) return;
+        setLista(chats);
+        if (chats.length > 0) await abrir(chats[0].id);
+        else nueva();
+      } catch {
+        if (vivo) nueva();
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [idClase, abrir, nueva]);
+
+  if (!chatId || iniciales === null) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cargando conversación…
+      </div>
+    );
+  }
+
+  return (
+    <Conversacion
+      key={chatId}
+      idClase={idClase}
+      chatId={chatId}
+      iniciales={iniciales}
+      lista={lista}
+      refrescarLista={refrescarLista}
+      abrir={abrir}
+      nueva={nueva}
+    />
+  );
+}
+
+function Conversacion({
+  idClase,
+  chatId,
+  iniciales,
+  lista,
+  refrescarLista,
+  abrir,
+  nueva,
+}: {
+  idClase: string;
+  chatId: string;
+  iniciales: UIMessage[];
+  lista: MetaChat[];
+  refrescarLista: () => Promise<void>;
+  abrir: (cid: string) => Promise<void>;
+  nueva: () => void;
+}) {
   const { seleccion, captura, minutoCaptura, limpiarAdjuntos } = useAdjuntosChat();
   const [texto, setTexto] = useState("");
   const abajo = useRef<HTMLDivElement>(null);
 
   const transport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { idClase } }),
-    [idClase],
+    () => new DefaultChatTransport({ api: "/api/chat", body: { idClase, chatId } }),
+    [idClase, chatId],
   );
-  const { messages, sendMessage, status, stop, error } = useChat({ transport });
+  const { messages, sendMessage, status, stop, error } = useChat({
+    transport,
+    messages: iniciales,
+  });
 
   const ocupado = status === "submitted" || status === "streaming";
+  const metaActual = lista.find((c) => c.id === chatId);
 
   useEffect(() => {
     abajo.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, status]);
+
+  // autoguardado: persiste el historial en cuanto cambian los mensajes
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const t = setTimeout(async () => {
+      try {
+        await fetch(`/api/chats/${idClase}/${chatId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages }),
+        });
+        if (status === "ready") await refrescarLista();
+      } catch {
+        // sin conexión local imposible, pero no interrumpir el chat
+      }
+    }, 900);
+    return () => clearTimeout(t);
+  }, [messages, status, idClase, chatId, refrescarLista]);
 
   const enviar = (textoExtra = "") => {
     const final = (textoExtra || texto).trim();
@@ -99,8 +247,55 @@ export function PanelChat({ idClase }: { idClase: string }) {
     });
   };
 
+  const borrarActual = async () => {
+    await fetch(`/api/chats/${idClase}/${chatId}`, { method: "DELETE" });
+    toast.success("Conversación eliminada");
+    await refrescarLista();
+    nueva();
+  };
+
   return (
     <div className="flex h-full flex-col">
+      {/* barra de historial */}
+      <div className="flex shrink-0 items-center gap-1.5 border-b px-2.5 py-1.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 max-w-[75%] gap-1.5 px-2 text-xs">
+              <History className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="truncate">{metaActual?.titulo ?? "Nueva conversación"}</span>
+              <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-80">
+            <DropdownMenuItem onClick={nueva}>
+              <MessageSquarePlus className="mr-2 h-4 w-4" /> Nueva conversación
+            </DropdownMenuItem>
+            {lista.length > 0 && <DropdownMenuSeparator />}
+            {lista.map((c) => (
+              <DropdownMenuItem
+                key={c.id}
+                onClick={() => c.id !== chatId && abrir(c.id)}
+                className={cn("gap-2", c.id === chatId && "bg-accent")}
+              >
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">{c.titulo}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {fechaLegible(c.actualizado)} · {c.nMensajes} msj
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto h-7 w-7 text-muted-foreground hover:text-destructive"
+          title="Eliminar esta conversación"
+          onClick={borrarActual}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">

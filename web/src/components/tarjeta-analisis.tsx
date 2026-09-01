@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  BookOpen,
   Download,
   ExternalLink,
   FileText,
+  GraduationCap,
   Loader2,
   MoreVertical,
   RefreshCw,
@@ -175,10 +177,24 @@ export function TarjetaAnalisis({ a }: { a: ResumenAnalisis }) {
             {a.titulo}
           </h3>
         </Link>
+        {(a.materia || a.profesor) && (
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] font-medium">
+            {a.materia && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary">
+                <BookOpen className="h-3 w-3" /> {a.materia}
+              </span>
+            )}
+            {a.profesor && (
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <GraduationCap className="h-3 w-3" /> {a.profesor}
+              </span>
+            )}
+          </p>
+        )}
         <p className="mt-1 text-xs text-muted-foreground">
           {fechaLegible(a.creado)} · {a.nTemas} temas · {a.nDiapositivas} diapositivas
         </p>
-        <div className="mt-3 flex gap-2 pt-1">
+        <div className="mt-auto flex gap-2 pt-3">
           <Button asChild size="sm" className="flex-1">
             <Link href={`/clase/${a.id}`}>
               <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Abrir

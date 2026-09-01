@@ -413,7 +413,13 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
         <GridDiapositivas id={id} frames={frames} descripciones={descripciones} pedirSeek={pedirSeek} />
       </TabsContent>
 
-      <TabsContent value="chat" className="mt-0 min-h-0 flex-1 overflow-hidden">
+      {/* forceMount: el chat sigue vivo (y la respuesta en curso sigue llegando)
+          aunque cambies de pestaña; se oculta con el atributo de estado */}
+      <TabsContent
+        forceMount
+        value="chat"
+        className="mt-0 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden"
+      >
         <PanelChat idClase={id} />
       </TabsContent>
     </Tabs>
@@ -427,6 +433,8 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
             {informe?.titulo ?? id}
           </h1>
           <p className="text-xs text-muted-foreground">
+            {[informe?.materia, informe?.profesor].filter(Boolean).join(" · ")}
+            {informe?.materia || informe?.profesor ? " · " : ""}
             {meta?.creado ? fechaLegible(meta.creado) : ""} · Haz clic en cualquier minuto para saltar
             al video · Selecciona texto de la voz para preguntarle a la IA
           </p>
