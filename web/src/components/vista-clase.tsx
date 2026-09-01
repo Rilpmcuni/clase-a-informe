@@ -1,9 +1,13 @@
 "use client";
 
+import "@vidstack/react/player/styles/default/theme.css";
+import "@vidstack/react/player/styles/default/layouts/video.css";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Camera,
+  Crop,
   Download,
   FileText,
   ListVideo,
@@ -11,14 +15,21 @@ import {
   MessageCircle,
   ScrollText,
   Sparkles,
+  X,
 } from "lucide-react";
+import {
+  MediaPlayer,
+  MediaProvider,
+  Track,
+  type MediaPlayerInstance,
+} from "@vidstack/react";
+import { DefaultVideoLayout, defaultLayoutIcons } from "@vidstack/react/player/layouts/default";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useReproductor, useAdjuntosChat } from "@/lib/store";
@@ -38,27 +49,42 @@ function usarPantallaGrande() {
   return grande;
 }
 
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
   const { id, informe, transcripcion, frames, descripciones, meta } = detalle;
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<MediaPlayerInstance>(null);
+  const cajaVideoRef = useRef<HTMLDivElement>(null);
   const listaTransRef = useRef<HTMLDivElement>(null);
   const [descargandoPdf, setDescargandoPdf] = useState(false);
   const grande = usarPantallaGrande();
 
-  const tiempo = useReproductor((s) => s.tiempo);
+  // --- selección de área sobre el video ---
+  const [selModo, setSelModo] = useState(false);
+  const [selRect, setSelRect] = useState<Rect | null>(null);
+  const arrastreInicio = useRef<{ x: number; y: number } | null>(null);
+
   const seekPendiente = useReproductor((s) => s.seekPendiente);
   const pedirSeek = useReproductor((s) => s.pedirSeek);
   const consumirSeek = useReproductor((s) => s.consumirSeek);
   const setSeleccion = useAdjuntosChat((s) => s.setSeleccion);
   const setCaptura = useAdjuntosChat((s) => s.setCaptura);
+  const captura = useAdjuntosChat((s) => s.captura);
+  const minutoCaptura = useAdjuntosChat((s) => s.minutoCaptura);
+  const limpiarAdjuntos = useAdjuntosChat((s) => s.limpiarAdjuntos);
 
   // aplicar seeks que pida cualquier parte de la UI
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v || seekPendiente == null) return;
-    v.currentTime = Math.min(seekPendiente, v.duration || seekPendiente);
+    const p = playerRef.current;
+    if (!p || seekPendiente == null) return;
+    p.currentTime = Math.min(seekPendiente, p.state.duration || seekPendiente);
     consumirSeek();
-    void v.play().catch(() => {});
+    void p.play().catch(() => {});
   }, [seekPendiente, consumirSeek]);
 
   const descIndice = useMemo(() => {
@@ -67,14 +93,16 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
     return m;
   }, [descripciones]);
 
-  const indiceActivo = useMemo(() => {
+  // selector primitivo: solo re-renderiza cuando cambia el segmento activo,
+  // no en cada timeupdate del video
+  const indiceActivo = useReproductor((s) => {
     let idx = -1;
     for (let i = 0; i < transcripcion.length; i++) {
-      if (transcripcion[i].inicio <= tiempo + 0.05) idx = i;
+      if (transcripcion[i].inicio <= s.tiempo + 0.05) idx = i;
       else break;
     }
     return idx;
-  }, [transcripcion, tiempo]);
+  });
 
   // auto-scroll de la transcripción al segmento activo
   useEffect(() => {
@@ -83,23 +111,51 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
     el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [indiceActivo]);
 
-  const capturarFotograma = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = v.videoWidth;
-    canvas.height = v.videoHeight;
-    canvas.getContext("2d")?.drawImage(v, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-    setCaptura(dataUrl, v.currentTime);
-  }, [setCaptura]);
+  // --- captura de fotogramas (área o completo) ---
+  const videoNativo = (): HTMLVideoElement | null => {
+    const el = playerRef.current?.el as HTMLElement | null | undefined;
+    if (!el) return null;
+    return (el.shadowRoot?.querySelector("video") ?? el.querySelector("video")) as HTMLVideoElement | null;
+  };
 
-  // el botón de captura del chat dispara este evento global
-  useEffect(() => {
-    const handler = () => capturarFotograma();
-    window.addEventListener("capturar-fotograma", handler);
-    return () => window.removeEventListener("capturar-fotograma", handler);
-  }, [capturarFotograma]);
+  const capturar = useCallback(
+    (zona: Rect | null) => {
+      const v = videoNativo();
+      const caja = cajaVideoRef.current?.getBoundingClientRect();
+      if (!v || !caja || !v.videoWidth) return;
+
+      // rect de la imagen real dentro del elemento (letterboxing)
+      const escala = Math.min(caja.width / v.videoWidth, caja.height / v.videoHeight);
+      const anchoVis = v.videoWidth * escala;
+      const altoVis = v.videoHeight * escala;
+      const offX = (caja.width - anchoVis) / 2;
+      const offY = (caja.height - altoVis) / 2;
+
+      let sx = 0;
+      let sy = 0;
+      let sw = v.videoWidth;
+      let sh = v.videoHeight;
+      if (zona) {
+        const x0 = Math.max(zona.x - offX, 0) / escala;
+        const y0 = Math.max(zona.y - offY, 0) / escala;
+        const x1 = Math.min(zona.x + zona.w - offX, anchoVis) / escala;
+        const y1 = Math.min(zona.y + zona.h - offY, altoVis) / escala;
+        sw = x1 - x0;
+        sh = y1 - y0;
+        if (sw < 20 || sh < 20) return;
+        sx = x0;
+        sy = y0;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(sw);
+      canvas.height = Math.round(sh);
+      canvas.getContext("2d")?.drawImage(v, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      setCaptura(dataUrl, playerRef.current?.currentTime ?? 0);
+    },
+    [setCaptura],
+  );
 
   const alSeleccionar = () => {
     const sel = window.getSelection()?.toString().trim() ?? "";
@@ -117,6 +173,70 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
       setDescargandoPdf(false);
     }
   };
+
+  // eventos de arrastre del overlay de selección
+  const posEnCaja = (e: React.MouseEvent) => {
+    const caja = cajaVideoRef.current!.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max(e.clientX - caja.left, 0), caja.width),
+      y: Math.min(Math.max(e.clientY - caja.top, 0), caja.height),
+    };
+  };
+
+  const overlayMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    arrastreInicio.current = posEnCaja(e);
+    setSelRect(null);
+  };
+  const overlayMouseMove = (e: React.MouseEvent) => {
+    const inicio = arrastreInicio.current;
+    if (!inicio) return;
+    const p = posEnCaja(e);
+    setSelRect({
+      x: Math.min(inicio.x, p.x),
+      y: Math.min(inicio.y, p.y),
+      w: Math.abs(p.x - inicio.x),
+      h: Math.abs(p.y - inicio.y),
+    });
+  };
+  const overlayMouseUp = () => {
+    const inicio = arrastreInicio.current;
+    arrastreInicio.current = null;
+    if (!inicio || !selRect || selRect.w < 12 || selRect.h < 12) {
+      setSelRect(null);
+      return;
+    }
+    capturar(selRect);
+    setSelRect(null);
+    setSelModo(false);
+    toast.success("Área capturada y adjuntada al chat", {
+      description: "Puedes quitarla o enviarla con tu pregunta.",
+    });
+  };
+
+  // cancelar selección con Escape
+  useEffect(() => {
+    if (!selModo) return;
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelModo(false);
+        setSelRect(null);
+        arrastreInicio.current = null;
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [selModo]);
+
+  // el botón de cámara del chat pide entrar en modo selección
+  useEffect(() => {
+    const handler = () => {
+      setSelModo(true);
+      toast.info("Arrastra sobre el video para seleccionar el área");
+    };
+    window.addEventListener("seleccionar-fotograma", handler);
+    return () => window.removeEventListener("seleccionar-fotograma", handler);
+  }, []);
 
   const barraTemas = (
     <div className="mt-3 flex flex-wrap gap-1.5">
@@ -138,21 +258,104 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
 
   const reproductor = (
     <div>
-      <div className="relative overflow-hidden rounded-xl border bg-black shadow-md">
-        <video
-          ref={videoRef}
-          src={`/api/video/${id}`}
-          controls
-          playsInline
-          className="aspect-video w-full"
-          onTimeUpdate={(e) => useReproductor.getState().setTiempo(e.currentTarget.currentTime)}
-        />
+      <div ref={cajaVideoRef} className="relative overflow-hidden rounded-xl border bg-black shadow-md">
+        <div style={{ aspectRatio: `${meta?.ancho ?? 1920} / ${meta?.alto ?? 1080}` }}>
+          <MediaPlayer
+            ref={playerRef}
+            src={`/api/video/${id}`}
+            streamType="on-demand"
+            viewType="video"
+            title={informe?.titulo ?? id}
+            className="h-full w-full"
+            onTimeUpdate={(detalleEv) => useReproductor.getState().setTiempo(detalleEv.currentTime)}
+          >
+            <MediaProvider>
+              <Track
+                src={`/api/subtitulos/${id}`}
+                kind="subtitles"
+                label="Español"
+                lang="es"
+                default
+              />
+              <DefaultVideoLayout icons={defaultLayoutIcons} thumbnails={`/api/thumbs/${id}`} />
+            </MediaProvider>
+          </MediaPlayer>
+        </div>
+
+        {selModo && (
+          <div
+            className="absolute inset-0 z-30 cursor-crosshair bg-black/50"
+            onMouseDown={overlayMouseDown}
+            onMouseMove={overlayMouseMove}
+            onMouseUp={overlayMouseUp}
+            onMouseLeave={overlayMouseUp}
+          >
+            {selRect && (
+              <div
+                className="absolute border-2 border-dashed border-white"
+                style={{
+                  left: selRect.x,
+                  top: selRect.y,
+                  width: selRect.w,
+                  height: selRect.h,
+                  boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)",
+                }}
+              >
+                <span className="absolute -top-6 left-0 rounded bg-background/90 px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+                  {Math.round(selRect.w)}×{Math.round(selRect.h)} · suelta para capturar
+                </span>
+              </div>
+            )}
+            {!selRect && (
+              <p className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full bg-background/90 px-3 py-1 text-xs font-medium text-foreground shadow">
+                Arrastra para seleccionar el área · Esc para cancelar
+              </p>
+            )}
+          </div>
+        )}
       </div>
-      <div className="mt-2 flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={capturarFotograma}>
-          <Camera className="mr-1.5 h-3.5 w-3.5" /> Capturar fotograma para el chat
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Button
+          variant={selModo ? "default" : "outline"}
+          size="sm"
+          onClick={() => setSelModo((v) => !v)}
+        >
+          {selModo ? <X className="mr-1.5 h-3.5 w-3.5" /> : <Crop className="mr-1.5 h-3.5 w-3.5" />}
+          {selModo ? "Cancelar selección" : "Seleccionar área del video"}
         </Button>
-        {meta?.duracion ? (
+        <Button
+          variant="outline"
+          size="sm"
+          title="Adjuntar el fotograma completo al chat"
+          onClick={() => {
+            capturar(null);
+            toast.success("Fotograma completo adjuntado al chat");
+          }}
+        >
+          <Camera className="mr-1.5 h-3.5 w-3.5" /> Fotograma completo
+        </Button>
+
+        {captura && (
+          <span className="ml-auto flex items-center gap-2 rounded-lg border bg-accent/30 p-1.5 pr-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={captura} alt="fotograma capturado" className="h-12 rounded border bg-black object-contain" />
+            <span className="text-[11px] leading-tight text-accent-foreground">
+              capturado
+              <br />
+              <span className="font-mono font-semibold">{mmss(minutoCaptura)}</span>
+            </span>
+            <button
+              onClick={limpiarAdjuntos}
+              title="Quitar captura"
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        )}
+
+        {meta?.duracion && !captura ? (
           <span className="ml-auto text-xs text-muted-foreground">
             {mmss(meta.duracion)} · {meta.ancho}×{meta.alto}
           </span>
@@ -163,15 +366,15 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
   );
 
   const pestanas = (
-    <Tabs defaultValue="informe" className="flex h-full flex-col gap-0">
-      <TabsList className="mx-3 mt-3 grid w-auto grid-cols-4">
+    <Tabs defaultValue="informe" className="flex h-full min-h-0 flex-col gap-0">
+      <TabsList className="mx-3 mt-3 grid w-auto grid-cols-4 shrink-0">
         <TabsTrigger value="informe" className="gap-1.5"><FileText className="h-3.5 w-3.5" /><span className="hidden md:inline">Informe</span></TabsTrigger>
         <TabsTrigger value="transcripcion" className="gap-1.5"><ScrollText className="h-3.5 w-3.5" /><span className="hidden md:inline">Voz</span></TabsTrigger>
         <TabsTrigger value="diapositivas" className="gap-1.5"><ListVideo className="h-3.5 w-3.5" /><span className="hidden md:inline">Slides</span></TabsTrigger>
         <TabsTrigger value="chat" className="gap-1.5"><MessageCircle className="h-3.5 w-3.5" />Chat</TabsTrigger>
       </TabsList>
 
-      <TabsContent value="informe" className="mt-0 flex-1 overflow-y-auto p-4">
+      <TabsContent value="informe" className="mt-0 min-h-0 flex-1 overflow-y-auto p-4">
         {informe ? (
           <InformeRender informe={informe} id={id} frames={frames} descIndice={descIndice} pedirSeek={pedirSeek} />
         ) : (
@@ -179,7 +382,7 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
         )}
       </TabsContent>
 
-      <TabsContent value="transcripcion" className="mt-0 flex-1 overflow-hidden">
+      <TabsContent value="transcripcion" className="mt-0 min-h-0 flex-1 overflow-hidden">
         <div
           ref={listaTransRef}
           onMouseUp={alSeleccionar}
@@ -206,19 +409,19 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
         </div>
       </TabsContent>
 
-      <TabsContent value="diapositivas" className="mt-0 flex-1 overflow-y-auto p-4">
+      <TabsContent value="diapositivas" className="mt-0 min-h-0 flex-1 overflow-y-auto p-4">
         <GridDiapositivas id={id} frames={frames} descripciones={descripciones} pedirSeek={pedirSeek} />
       </TabsContent>
 
-      <TabsContent value="chat" className="mt-0 flex-1 overflow-hidden">
+      <TabsContent value="chat" className="mt-0 min-h-0 flex-1 overflow-hidden">
         <PanelChat idClase={id} />
       </TabsContent>
     </Tabs>
   );
 
   return (
-    <div className="mx-auto max-w-[1700px] px-4 py-5">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+    <div className="mx-auto flex max-w-[1700px] flex-col gap-4 px-4 lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden">
+      <div className="flex flex-wrap items-center gap-3 pb-1 pt-5 lg:pt-3">
         <div className="min-w-0 flex-1">
           <h1 className="font-display truncate text-xl font-bold sm:text-2xl">
             {informe?.titulo ?? id}
@@ -244,11 +447,11 @@ export function VistaClase({ detalle }: { detalle: DetalleAnalisis }) {
       {grande ? (
         <ResizablePanelGroup
           orientation="horizontal"
-          className="min-h-[calc(100vh-160px)] rounded-xl border bg-card"
+          className="min-h-0 flex-1 rounded-xl border bg-card"
         >
           <ResizablePanel defaultSize="56" minSize="32">
-            <div className="h-full overflow-y-auto p-4">
-              {reproductor}
+            <div className="flex h-full flex-col overflow-y-auto p-4">
+              <div className="my-auto">{reproductor}</div>
             </div>
           </ResizablePanel>
           <ResizableHandle withHandle />
@@ -316,7 +519,7 @@ function InformeRender({
           {t.conceptos?.length ? (
             <div className="grid gap-2 sm:grid-cols-2">
               {t.conceptos.map((c, j) => (
-                <div key={j} className="rounded-lg border bg-muted/40 p-3">
+                <div key={j} className="rounded-lg border bg-card p-3">
                   <p className="text-sm font-semibold text-primary">{c.termino}</p>
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{c.definicion}</p>
                 </div>
@@ -326,46 +529,42 @@ function InformeRender({
 
           {t.preguntas?.length ? (
             <Accordion type="single" collapsible className="rounded-lg border px-4">
-              <AccordionItem value="qa" className="border-0">
-                <AccordionTrigger className="text-sm font-semibold">
-                  Preguntas y respuestas de la clase ({t.preguntas.length})
-                </AccordionTrigger>
-                <AccordionContent className="space-y-3">
-                  {t.preguntas.map((p, j) => (
-                    <div key={j} className="border-l-2 border-primary/40 pl-3">
-                      <p className="text-sm font-semibold">{p.pregunta}</p>
-                      <p className="mt-0.5 text-sm text-muted-foreground">{p.respuesta}</p>
-                    </div>
-                  ))}
-                </AccordionContent>
-              </AccordionItem>
+              <p className="pt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Preguntas y respuestas de la clase
+              </p>
+              {t.preguntas.map((p, j) => (
+                <AccordionItem key={j} value={`pq-${i}-${j}`}>
+                  <AccordionTrigger className="text-left text-sm font-medium">{p.pregunta}</AccordionTrigger>
+                  <AccordionContent className="text-sm text-muted-foreground">{p.respuesta}</AccordionContent>
+                </AccordionItem>
+              ))}
             </Accordion>
           ) : null}
 
           {t.datos_curiosos?.length ? (
-            <ul className="space-y-1 rounded-lg border border-accent/40 bg-accent/20 p-3">
-              {t.datos_curiosos.map((c, j) => (
-                <li key={j} className="flex gap-2 text-sm text-accent-foreground">
-                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {c}
-                </li>
-              ))}
-            </ul>
+            <div className="rounded-lg border border-accent/60 bg-accent/20 p-3">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-accent-foreground">Datos curiosos</p>
+              <ul className="list-disc space-y-1 pl-4 text-sm text-accent-foreground">
+                {t.datos_curiosos.map((d, j) => (
+                  <li key={j}>{d}</li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </section>
       ))}
 
       {informe.examen?.length ? (
-        <section className="space-y-2">
+        <section className="space-y-2 pb-4">
           <h2 className="font-display font-semibold">Posibles preguntas de examen</h2>
-          <Accordion type="single" collapsible>
+          <Accordion type="single" collapsible className="rounded-lg border px-4">
             {informe.examen.map((p, i) => (
               <AccordionItem key={i} value={`ex-${i}`}>
-                <AccordionTrigger className="text-left text-sm">
-                  <span className="mr-2 text-primary">{i + 1}.</span> {p.pregunta}
+                <AccordionTrigger className="text-left text-sm font-medium">
+                  <span className="mr-2 text-primary">{String(i + 1).padStart(2, "0")}</span>
+                  {p.pregunta}
                 </AccordionTrigger>
-                <AccordionContent className="text-sm text-muted-foreground">
-                  {p.respuesta}
-                </AccordionContent>
+                <AccordionContent className="text-sm text-muted-foreground">{p.respuesta}</AccordionContent>
               </AccordionItem>
             ))}
           </Accordion>
@@ -426,54 +625,59 @@ function GridDiapositivas({
   descripciones: DetalleAnalisis["descripciones"];
   pedirSeek: (t: number) => void;
 }) {
-  const [soloRelevantes, setSoloRelevantes] = useState(false);
-  const relevancia = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const d of descripciones) m.set(d.archivo, d.relevancia ?? "");
-    return m;
-  }, [descripciones]);
-  const titulos = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const d of descripciones) m.set(d.archivo, d.titulo ?? d.archivo);
+  const [soloRelevantes, setSoloRelevantes] = useState(true);
+  const descPor = useMemo(() => {
+    const m = new Map<string, (typeof descripciones)[number]>();
+    for (const d of descripciones) m.set(d.archivo, d);
     return m;
   }, [descripciones]);
 
-  const lista = soloRelevantes
-    ? frames.filter((f) => ["alta", "media"].includes(relevancia.get(f.archivo) ?? ""))
-    : frames;
+  const visibles = frames.filter((f) => {
+    if (!soloRelevantes) return true;
+    const r = descPor.get(f.archivo)?.relevancia;
+    return r === "alta" || r === "media";
+  });
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-2">
-        <Switch id="solo-relevantes" checked={soloRelevantes} onCheckedChange={setSoloRelevantes} />
-        <Label htmlFor="solo-relevantes" className="text-sm">
-          Solo diapositivas relevantes (ocultar UI de videoconferencia)
-        </Label>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          {visibles.length} de {frames.length} capturas
+        </p>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Solo diapositivas relevantes (ocultar UI de videoconferencia)</span>
+          <Switch checked={soloRelevantes} onCheckedChange={setSoloRelevantes} />
+        </label>
       </div>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
-        {lista.map((f) => (
-          <button
-            key={f.archivo}
-            onClick={() => pedirSeek(f.tiempos?.[0] ?? f.tiempo)}
-            className="group overflow-hidden rounded-lg border text-left transition-shadow hover:shadow-md"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/api/frame/${id}/${encodeURIComponent(f.archivo)}`}
-              alt={titulos.get(f.archivo) || f.archivo}
-              className="aspect-video w-full bg-muted object-contain"
-            />
-            <div className="border-t p-2">
-              <p className="truncate text-xs font-medium group-hover:text-primary">
-                {titulos.get(f.archivo)}
-              </p>
-              <p className="mt-0.5 flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
-                {mmss(f.tiempos?.[0] ?? f.tiempo)}
-                {f.veces > 1 ? <span>· ×{f.veces}</span> : null}
-              </p>
-            </div>
-          </button>
-        ))}
+        {visibles.map((f) => {
+          const d = descPor.get(f.archivo);
+          const t = f.tiempos?.[0] ?? f.tiempo ?? 0;
+          return (
+            <button
+              key={f.archivo}
+              onClick={() => pedirSeek(t)}
+              className="group overflow-hidden rounded-lg border text-left transition-shadow hover:shadow-md"
+              title={`Saltar a ${mmss(t)}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/frame/${id}/${encodeURIComponent(f.archivo)}`}
+                alt={d?.titulo || f.archivo}
+                className="aspect-video w-full bg-muted object-cover"
+              />
+              <div className="border-t bg-card p-2">
+                <p className="truncate text-xs font-medium group-hover:text-primary">
+                  {d?.titulo || f.archivo}
+                </p>
+                <p className="mt-0.5 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
+                  <span>{mmss(t)}</span>
+                  {d?.relevancia === "alta" && <span className="text-primary">★ relevante</span>}
+                </p>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

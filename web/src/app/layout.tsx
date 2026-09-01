@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Fraunces } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { Cabecera } from "@/components/cabecera";
+import { ProveedorDeTema } from "@/components/theme-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,12 +30,15 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="es"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Cabecera />
-        <main className="flex-1">{children}</main>
-        <Toaster richColors position="bottom-right" />
+        <ProveedorDeTema>
+          <Cabecera />
+          <main className="flex-1">{children}</main>
+          <Toaster richColors position="bottom-right" />
+        </ProveedorDeTema>
       </body>
     </html>
   );

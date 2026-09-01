@@ -3,15 +3,43 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Bot, Camera, Loader2, Send, Square, TriangleAlert, User } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { useAdjuntosChat } from "@/lib/store";
 import { mmss } from "@/lib/tiempo";
 import { cn } from "@/lib/utils";
 
+// Estilos de markdown para las respuestas del asistente (GFM: tablas, listas, código…)
+const clasesMarkdown = [
+  "space-y-2 text-sm leading-relaxed [&>*:first-child]:mt-0",
+  "[&_h1]:text-base [&_h1]:font-bold",
+  "[&_h2]:text-[15px] [&_h2]:font-bold",
+  "[&_h3]:font-semibold [&_h4]:font-semibold",
+  "[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5",
+  "[&_li]:my-0.5 [&_li]:marker:text-muted-foreground",
+  "[&_code]:rounded [&_code]:bg-foreground/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]",
+  "[&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-foreground/10 [&_pre]:p-3 [&_pre]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0",
+  "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs",
+  "[&_th]:border [&_th]:border-border [&_th]:bg-background/60 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left",
+  "[&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1",
+  "[&_blockquote]:border-l-2 [&_blockquote]:border-primary/50 [&_blockquote]:pl-3 [&_blockquote]:italic",
+  "[&_a]:font-medium [&_a]:text-primary [&_a]:underline",
+  "[&_hr]:my-3 [&_hr]:border-border",
+].join(" ");
+
+function Markdown({ texto }: { texto: string }) {
+  return (
+    <div className={clasesMarkdown}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{texto}</ReactMarkdown>
+    </div>
+  );
+}
+
+// Texto plano con **negritas** para los mensajes del usuario
 function TextoSimple({ texto }: { texto: string }) {
   return (
     <div className="space-y-1.5 whitespace-pre-wrap text-sm leading-relaxed">
@@ -31,7 +59,7 @@ function TextoSimple({ texto }: { texto: string }) {
 }
 
 export function PanelChat({ idClase }: { idClase: string }) {
-  const { seleccion, captura, minutoCaptura, setSeleccion, limpiarAdjuntos } = useAdjuntosChat();
+  const { seleccion, captura, minutoCaptura, limpiarAdjuntos } = useAdjuntosChat();
   const [texto, setTexto] = useState("");
   const abajo = useRef<HTMLDivElement>(null);
 
@@ -61,8 +89,14 @@ export function PanelChat({ idClase }: { idClase: string }) {
         : undefined,
     });
     setTexto("");
-    setSeleccion("");
     limpiarAdjuntos();
+  };
+
+  const pedirSeleccion = () => {
+    window.dispatchEvent(new CustomEvent("seleccionar-fotograma"));
+    toast.info("Arrastra sobre el video para seleccionar el área", {
+      description: "Se capturará y quedará adjunta aquí. Esc para cancelar.",
+    });
   };
 
   return (
@@ -110,10 +144,10 @@ export function PanelChat({ idClase }: { idClase: string }) {
             >
               {m.parts.map((parte, i) => {
                 if (parte.type === "text") {
-                  return (
-                    <div key={i} className={m.role === "user" ? "[&_strong]:font-semibold" : ""}>
-                      <TextoSimple texto={parte.text} />
-                    </div>
+                  return m.role === "user" ? (
+                    <TextoSimple key={i} texto={parte.text} />
+                  ) : (
+                    <Markdown key={i} texto={parte.text} />
                   );
                 }
                 if (parte.type === "file" && parte.mediaType?.startsWith("image/")) {
@@ -157,11 +191,19 @@ export function PanelChat({ idClase }: { idClase: string }) {
 
       <div className="border-t p-3">
         {(seleccion || captura) && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border bg-accent/30 px-2.5 py-1.5 text-xs">
+          <div className="mb-2 flex items-center gap-2.5 rounded-lg border bg-accent/30 px-2.5 py-1.5 text-xs">
             {captura ? (
-              <Badge variant="secondary" className="gap-1">
-                <Camera className="h-3 w-3" /> fotograma {mmss(minutoCaptura)}
-              </Badge>
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={captura}
+                  alt="fotograma adjunto"
+                  className="h-10 w-16 shrink-0 rounded border bg-black object-cover"
+                />
+                <span className="shrink-0 font-mono text-accent-foreground">
+                  {mmss(minutoCaptura)}
+                </span>
+              </>
             ) : null}
             {seleccion ? (
               <span className="truncate text-accent-foreground">«{seleccion.slice(0, 60)}…»</span>
@@ -178,12 +220,8 @@ export function PanelChat({ idClase }: { idClase: string }) {
           <Button
             size="icon"
             variant="outline"
-            title="Capturar fotograma actual del video"
-            onClick={() => {
-              const evento = new CustomEvent("capturar-fotograma");
-              window.dispatchEvent(evento);
-              toast.success("Fotograma capturado", { description: "Se adjuntará al mensaje" });
-            }}
+            title="Seleccionar un área del video y adjuntarla al chat"
+            onClick={pedirSeleccion}
           >
             <Camera className="h-4 w-4" />
           </Button>

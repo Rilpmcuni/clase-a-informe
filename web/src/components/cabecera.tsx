@@ -1,9 +1,49 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GraduationCap, LayoutDashboard, Upload, Settings2, Brain } from "lucide-react";
+import { useTheme } from "next-themes";
+import { GraduationCap, LayoutDashboard, Upload, Settings2, Brain, Monitor, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+function BotonTema() {
+  const { theme, setTheme, resolvedTheme } = useTheme();
+  const [montado, setMontado] = useState(false);
+  useEffect(() => setMontado(true), []);
+  if (!montado) return <span className="h-9 w-9" />;
+  const esOscuro = resolvedTheme === "dark";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" title="Cambiar tema">
+          {esOscuro ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => setTheme("light")}>
+          <Sun className="mr-2 h-4 w-4" /> Claro
+          {theme === "light" && <span className="ml-auto text-xs text-primary">✓</span>}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("dark")}>
+          <Moon className="mr-2 h-4 w-4" /> Oscuro
+          {theme === "dark" && <span className="ml-auto text-xs text-primary">✓</span>}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("system")}>
+          <Monitor className="mr-2 h-4 w-4" /> Como el sistema
+          {theme === "system" && <span className="ml-auto text-xs text-primary">✓</span>}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 const enlaces = [
   { href: "/", etiqueta: "Clases", icono: LayoutDashboard },
@@ -44,6 +84,7 @@ export function Cabecera() {
               </Link>
             );
           })}
+          <BotonTema />
         </nav>
       </div>
     </header>
