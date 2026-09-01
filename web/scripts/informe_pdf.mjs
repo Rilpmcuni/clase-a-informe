@@ -5,6 +5,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import puppeteer from "puppeteer";
 
 const RAIZ = path.resolve(process.cwd(), "..");
@@ -22,10 +23,13 @@ function figura(id, archivo, titulo, texto, minuto) {
   if (!archivo) return "";
   const ruta = path.join(DIR(id), "frames", path.basename(archivo));
   if (!fs.existsSync(ruta)) return "";
-  const caption = texto
-    ? `<figcaption><strong>${esc(titulo || "Diapositiva")}</strong> · minuto ${minuto}<span class="cap-texto">${esc(texto)}</span></figcaption>`
+  // Chrome no resuelve rutas de archivo peladas como src: hace falta file://
+  const src = pathToFileURL(ruta).href;
+  const textoCorto = texto ? texto.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+  const caption = textoCorto
+    ? `<figcaption><strong>${esc(titulo || "Diapositiva")}</strong> · minuto ${minuto}<span class="cap-texto">${esc(textoCorto)}</span></figcaption>`
     : `<figcaption><strong>${esc(titulo || "Diapositiva")}</strong> · minuto ${minuto}</figcaption>`;
-  return `<figure><img src="${ruta}" alt="${esc(titulo || archivo)}" />${caption}</figure>`;
+  return `<figure><img src="${src}" alt="${esc(titulo || archivo)}" />${caption}</figure>`;
 }
 
 function bloqueQA(p) {
@@ -74,11 +78,15 @@ function portada(informe, meta) {
   </section>`;
 }
 
-function paginaTema(num, t, id, tiempos, descripciones) {
+function paginaTema(num, t, id, tiempos, descripciones, yaVistos) {
   const descPor = new Map(descripciones.map((d) => [d.archivo, d]));
   const figuras = (t.frames ?? [])
     .map((archivo) => {
       const d = descPor.get(archivo) || {};
+      // solo diapositivas de alta relevancia, y cada una una sola vez en todo el PDF
+      if (d.relevancia && d.relevancia !== "alta") return "";
+      if (yaVistos.has(archivo)) return "";
+      yaVistos.add(archivo);
       const ts = tiempos.get(archivo) ?? [0];
       return figura(id, archivo, d.titulo, d.texto_visible, mmss(ts[0]));
     })
@@ -121,7 +129,10 @@ function css() {
   .temas-portada .n { font-family: Georgia, serif; font-weight: 700; color: #c2410c; font-size: 9pt; }
   .pie-portada { margin-top: auto; padding-top: 8mm; border-top: 0.25mm solid #e5e7eb; color: #6b7280; font-size: 8.5pt; }
 
-  .tema { page-break-before: always; }
+  /* Los temas fluyen continuos (con separador fuerte): forzar salto de página
+     por tema dejaba páginas finales casi vacías. */
+  .tema { margin-top: 11mm; padding-top: 7mm; border-top: 0.8mm solid #3730a3; }
+  .tema:first-of-type { margin-top: 2mm; padding-top: 0; border-top: none; }
   .tema header { display: flex; align-items: baseline; gap: 4mm; border-bottom: 0.6mm solid #3730a3; padding-bottom: 3mm; margin-bottom: 5mm; }
   .numero { font-size: 20pt; font-weight: 700; color: #6366f1; }
   .tema h2 { font-size: 16.5pt; color: #1e1b4b; flex: 1; }
@@ -135,6 +146,12 @@ function css() {
 
   .subtitillo { font-family: Georgia, serif; font-weight: 700; color: #3730a3; font-size: 11pt; margin: 6mm 0 3mm; }
   .conceptos { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin: 4mm 0; }
+  /* 4 columnas: el glosario típico (12-16 términos) cierra en una sola página,
+     dejando lugar para la línea de cierre del documento */
+  .seccion-glosario .conceptos { grid-template-columns: repeat(4, 1fr); gap: 2.2mm; }
+  .seccion-glosario .concepto { padding: 2mm 2.2mm; }
+  .seccion-glosario .concepto p { font-size: 7.1pt; }
+  .seccion-glosario .concepto .termino { font-size: 8.2pt; }
   .concepto { background: #f7f7fe; border: 0.3mm solid #e4e2f7; border-radius: 2.5mm; padding: 3mm 3.5mm; page-break-inside: avoid; }
   .concepto .termino { font-weight: 700; color: #3730a3; font-size: 9.5pt; margin-bottom: 1mm; }
   .concepto p:last-child { font-size: 9pt; }
@@ -143,17 +160,20 @@ function css() {
   .qa .q { font-weight: 700; color: #312e81; }
   .qa .r { color: #374151; margin-top: 1mm; }
 
+  .curiosos { page-break-inside: avoid; }
   .curiosos ul { margin-left: 5mm; }
   .curiosos li { margin: 1.5mm 0; }
 
   .seccion-examen h2, .seccion-glosario h2 { font-size: 15pt; color: #1e1b4b; border-bottom: 0.6mm solid #d97706; padding-bottom: 2.5mm; margin-bottom: 5mm; }
+  .cierre { margin-top: 3mm; padding-top: 3mm; border-top: 0.25mm solid #e5e7eb; color: #6b7280; font-size: 8pt; text-align: center; white-space: nowrap; }
   `;
 }
 
 function armarHtml(id, informe, frames, descripciones, meta) {
   const tiempos = new Map(frames.map((f) => [f.archivo, f.tiempos ?? [f.tiempo]]));
+  const yaVistos = new Set();
   const temas = (informe.temas ?? [])
-    .map((t, i) => paginaTema(i + 1, t, id, tiempos, descripciones))
+    .map((t, i) => paginaTema(i + 1, t, id, tiempos, descripciones, yaVistos))
     .join("");
   const examen = informe.examen?.length
     ? `<section class="seccion-examen"><h2>Posibles preguntas de examen</h2>${informe.examen
@@ -172,6 +192,7 @@ function armarHtml(id, informe, frames, descripciones, meta) {
     ${temas}
     ${examen}
     ${glosario}
+    <p class="cierre">Fin del informe · transcripción de voz, diapositivas y síntesis con IA · Clase a Informe</p>
   </body></html>`;
 }
 
@@ -192,10 +213,17 @@ async function main() {
   })();
 
   const html = armarHtml(id, informe, frames, descripciones, meta);
+  // El HTML va a disco y se navega con file://: desde about:blank (setContent)
+  // Chrome bloquea los subrecursos file:// y las diapositivas salen rotas.
+  const rutaHtml = path.join(dir, "informe.html");
+  fs.writeFileSync(rutaHtml, html);
   const navegador = await puppeteer.launch({ headless: true });
   try {
     const pagina = await navegador.newPage();
-    await pagina.setContent(html, { waitUntil: "networkidle0", timeout: 120_000 });
+    await pagina.goto(pathToFileURL(rutaHtml).href, {
+      waitUntil: "networkidle0",
+      timeout: 120_000,
+    });
     await pagina.pdf({
       path: path.join(dir, "informe.pdf"),
       format: "A4",

@@ -15,7 +15,8 @@ Analiza la imagen y responde EXCLUSIVAMENTE con un objeto JSON válido, sin text
  "formulas": ["fórmulas o código en texto plano"],
  "diagrama": "descripción del diagrama o figura si hay, si no cadena vacía",
  "relevancia": "alta|media|baja"}
-Si la imagen es un fotograma suelto de un video proyectado, una transición o algo sin valor de estudio, usa relevancia "baja"."""
+Si la imagen es un fotograma suelto de un video proyectado, una transición o algo sin valor de estudio, usa relevancia "baja".
+Si la clase es por videoconferencia, IGNORA por completo la interfaz: lista de participantes, cámaras, chat, barras y avisos del sistema (por ejemplo "usted está viendo la pantalla de..." o "escribe el mensaje aquí"). En "texto_visible" transcribe SOLO el contenido de la diapositiva, pizarra o documento compartido; si la captura es mayormente interfaz sin contenido compartido legible, usa relevancia "baja"."""
 
 
 class ClienteIA:
