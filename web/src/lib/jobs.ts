@@ -150,6 +150,10 @@ export function iniciarJob(
     } catch {
       // sin informe no hay nota
     }
+    // clasificación (materia + profesor) mirando voz y capturas; no bloquea el fin del job
+    void import("./clasificar")
+      .then(({ clasificarAnalisis }) => clasificarAnalisis(salidaAbs))
+      .catch(() => {});
     persistir(estado);
   });
   proceso.on("error", (err) => {
